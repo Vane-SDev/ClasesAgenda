@@ -29,7 +29,7 @@ import {
 // Importamos la instancia configurada
 import { auth, db } from './firebase';
 
-// ---------- 2. UTILIDADES ----------
+// --------- 2. UTILIDADES ----------
 const generateId = () => Math.random().toString(36).substring(2, 9);
 
 const currency = (v = 0) => new Intl.NumberFormat('es-AR', { 
