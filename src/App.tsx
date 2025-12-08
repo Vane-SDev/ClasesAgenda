@@ -54,7 +54,7 @@ const formatDateHeader = (dateStr: string) => {
   return date.toLocaleDateString('es-AR', { weekday: 'long', day: 'numeric', month: 'long' });
 };
 
-const withTimeout = <T,>(promise: Promise<T>, ms = 5000) => {
+const withTimeout = <T,>(promise: Promise<T>, ms = 12000) => {
   return Promise.race([
     promise,
     new Promise<T>((_, reject) => 
