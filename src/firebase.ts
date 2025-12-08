@@ -2,27 +2,58 @@ import { initializeApp } from 'firebase/app';
 import { getAuth } from 'firebase/auth';
 import { getFirestore } from 'firebase/firestore';
 
-// Gracias al archivo vite-env.d.ts, TypeScript ahora sabe que estas variables existen
+// 1. Cargamos la configuración desde las variables de entorno (.env.local)
+// TypeScript no se quejará gracias al archivo vite-env.d.ts
 const firebaseConfig = {
-  apiKey: "AIzaSyB_nKKCZxp9dkg4CFV7N6ySavuQ2BH7syk",
-  authDomain: "appclases-40e85.firebaseapp.com",
-  projectId: "appclases-40e85",
-  storageBucket: "appclases-40e85.firebasestorage.app",
-  messagingSenderId: "846276201926",
-  appId: "1:846276201926:web:f3573360f1c67c4112f6c7"
+  apiKey: import.meta.env.VITE_API_KEY,
+  authDomain: import.meta.env.VITE_AUTH_DOMAIN,
+  projectId: import.meta.env.VITE_PROJECT_ID,
+  storageBucket: import.meta.env.VITE_STORAGE_BUCKET,
+  messagingSenderId: import.meta.env.VITE_MESSAGING_SENDER_ID,
+  appId: import.meta.env.VITE_APP_ID
 };
 
-// Validación temprana para evitar claves inválidas/sin definir
-const missing = Object.entries(firebaseConfig)
-  .filter(([, value]) => !value || value === 'undefined')
-  .map(([key]) => key);
+// 2. Validación estricta: verifica que todas las variables estén definidas
+// Esto previene errores en runtime y asegura que las credenciales no se suban a GitHub
+const requiredKeys = [
+  'VITE_API_KEY',
+  'VITE_AUTH_DOMAIN',
+  'VITE_PROJECT_ID',
+  'VITE_STORAGE_BUCKET',
+  'VITE_MESSAGING_SENDER_ID',
+  'VITE_APP_ID'
+] as const;
 
-if (missing.length) {
-  const message = `Faltan variables de entorno Firebase: ${missing.join(', ')}. Define VITE_* en .env.local`;
-  console.error(message);
-  throw new Error(message);
+const missingKeys = requiredKeys.filter(
+  key => !import.meta.env[key] || import.meta.env[key] === 'undefined'
+);
+
+if (missingKeys.length > 0) {
+  const errorMessage = `
+╔══════════════════════════════════════════════════════════════╗
+║  ERROR: Variables de entorno Firebase no configuradas       ║
+╠══════════════════════════════════════════════════════════════╣
+║  Faltan las siguientes variables:                            ║
+║  ${missingKeys.map(k => `  • ${k}`).join('\n║  ')}              ║
+╠══════════════════════════════════════════════════════════════╣
+║  SOLUCIÓN:                                                   ║
+║  1. Crea un archivo .env.local en la raíz del proyecto      ║
+║  2. Copia .env.example y completa con tus credenciales       ║
+║  3. Reinicia el servidor de desarrollo                      ║
+╚══════════════════════════════════════════════════════════════╝
+  `;
+  
+  console.error(errorMessage);
+  
+  // En desarrollo, lanzamos error para detener la ejecución
+  if (import.meta.env.DEV) {
+    throw new Error(`Variables de entorno faltantes: ${missingKeys.join(', ')}`);
+  }
 }
 
+// 3. Inicializamos Firebase solo si todas las variables están presentes
 const app = initializeApp(firebaseConfig);
+
+// 4. Exportamos los servicios listos para usar en toda la app
 export const auth = getAuth(app);
 export const db = getFirestore(app);
