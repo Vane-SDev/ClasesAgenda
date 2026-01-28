@@ -40,3 +40,70 @@
 .read-the-docs {
   color: #888;
 }
+
+/* Estilos mejorados para los campos de hora en el modal */
+.time-input-wrapper {
+  position: relative;
+  transition: all 0.2s ease;
+}
+
+.time-input-wrapper:hover {
+  transform: translateY(-1px);
+}
+
+.time-input-wrapper.time-input-light:hover input {
+  border-color: #818cf8;
+  box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.1);
+}
+
+.time-input-wrapper.time-input-dark:hover input {
+  border-color: #818cf8;
+  box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.2);
+}
+
+.time-input {
+  font-weight: 500;
+  letter-spacing: 0.025em;
+  transition: all 0.2s ease;
+}
+
+.time-input:focus {
+  border-color: #818cf8;
+  box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.1);
+}
+
+.dark .time-input:focus {
+  box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.2);
+}
+
+/* Mejora del estilo del input time en diferentes navegadores */
+.time-input::-webkit-calendar-picker-indicator {
+  cursor: pointer;
+  opacity: 0.6;
+  filter: invert(0.3);
+  transition: opacity 0.2s ease;
+}
+
+.time-input:hover::-webkit-calendar-picker-indicator {
+  opacity: 1;
+}
+
+.dark .time-input::-webkit-calendar-picker-indicator {
+  filter: invert(0.8);
+}
+
+.time-input::-webkit-datetime-edit-fields-wrapper {
+  padding: 0;
+}
+
+.time-input::-webkit-datetime-edit-text {
+  padding: 0 2px;
+  color: inherit;
+}
+
+.time-input::-webkit-datetime-edit-hour-field:focus,
+.time-input::-webkit-datetime-edit-minute-field:focus {
+  background-color: rgba(99, 102, 241, 0.15);
+  border-radius: 3px;
+  outline: none;
+}

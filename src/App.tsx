@@ -4,7 +4,8 @@ import {
   Trash2, BookOpen, LogOut, MessageCircle, CheckCircle2, Clock, X,
   Loader2, Search,
   BarChart3, Download, TrendingUp, FileText, Bell, Square,
-  Sun, Moon, Pencil, Contact, Phone, Video, ExternalLink, StickyNote
+  Sun, Moon, Pencil, Contact, Phone, Video, ExternalLink, StickyNote,
+  Calendar, CalendarDays, CalendarRange
 } from 'lucide-react';
 import {
   onAuthStateChanged,
@@ -40,11 +41,29 @@ const currency = (v = 0) => new Intl.NumberFormat('es-AR', {
 const isPastDate = (dateStr: string) => {
   const today = new Date(); 
   today.setHours(0, 0, 0, 0);
-  return new Date(dateStr + 'T23:59:59') < today;
+  const d = safeParseDate(dateStr);
+  const endOfDay = new Date(d);
+  endOfDay.setHours(23, 59, 59, 999);
+  return endOfDay < today;
+};
+
+const isTodayDate = (dateStr: string) => {
+  const d = safeParseDate(dateStr);
+  const today = new Date();
+  return d.toDateString() === today.toDateString();
+};
+
+const isFutureDate = (dateStr: string) => {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const d = safeParseDate(dateStr);
+  const startOfDay = new Date(d);
+  startOfDay.setHours(0, 0, 0, 0);
+  return startOfDay > today;
 };
 
 const formatDateHeader = (dateStr: string) => {
-  const date = new Date(dateStr + 'T12:00:00');
+  const date = safeParseDate(dateStr);
   const today = new Date(); 
   const tomorrow = new Date(); 
   tomorrow.setDate(today.getDate() + 1);
@@ -62,7 +81,75 @@ const withTimeout = <T,>(promise: Promise<T>, ms = 15000) => {
   ]);
 };
 
-const parseDateLocal = (dateStr: string) => new Date(`${dateStr}T12:00:00`);
+const parseDateLocal = (dateStr: string) => safeParseDate(dateStr);
+
+// Funciones para estadísticas por período
+const safeParseDate = (dateStr: string) => {
+  // Soporta:
+  // - 'YYYY-MM-DD'
+  // - 'DD/MM/YYYY' o 'D/M/YYYY' (ej: 20/01/2026)
+  // - fallback a Date nativa si viene otro formato
+  // Para evitar timezone issues, fijamos al mediodía cuando parece fecha sin hora.
+  const raw = String(dateStr ?? '').trim();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) return new Date(raw + 'T12:00:00');
+  const m = /^(\d{1,2})\/(\d{1,2})\/(\d{4})$/.exec(raw);
+  if (m) {
+    const [, dd, mm, yyyy] = m;
+    const DD = String(dd).padStart(2, '0');
+    const MM = String(mm).padStart(2, '0');
+    return new Date(`${yyyy}-${MM}-${DD}T12:00:00`);
+  }
+  const d = new Date(raw);
+  if (!Number.isNaN(d.getTime())) return d;
+  // Último intento: tratarlo como si fuera ISO-date sin separadores extra
+  return new Date(raw + 'T12:00:00');
+};
+
+const getWeekKey = (dateStr: string) => {
+  const date = safeParseDate(dateStr);
+  const year = date.getFullYear();
+  const firstDayOfYear = new Date(year, 0, 1);
+  const pastDaysOfYear = (date.getTime() - firstDayOfYear.getTime()) / 86400000;
+  const weekNumber = Math.ceil((pastDaysOfYear + firstDayOfYear.getDay() + 1) / 7);
+  return `${year}-W${weekNumber.toString().padStart(2, '0')}`;
+};
+
+const getMonthKey = (dateStr: string) => {
+  const d = safeParseDate(dateStr);
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  return `${y}-${m}`;
+};
+const getYearKey = (dateStr: string) => String(safeParseDate(dateStr).getFullYear());
+
+const formatWeekLabel = (weekKey: string) => {
+  const [year, week] = weekKey.split('-W');
+  const firstDayOfYear = new Date(parseInt(year), 0, 1);
+  const daysToAdd = (parseInt(week) - 1) * 7;
+  const weekStart = new Date(firstDayOfYear);
+  weekStart.setDate(firstDayOfYear.getDate() - firstDayOfYear.getDay() + daysToAdd);
+  const weekEnd = new Date(weekStart);
+  weekEnd.setDate(weekStart.getDate() + 6);
+  return `Sem ${week} ${year}`;
+};
+
+const isInCurrentWeek = (dateStr: string) => {
+  const date = safeParseDate(dateStr);
+  const today = new Date();
+  const firstDayOfWeek = new Date(today);
+  firstDayOfWeek.setDate(today.getDate() - today.getDay());
+  firstDayOfWeek.setHours(0, 0, 0, 0);
+  const lastDayOfWeek = new Date(firstDayOfWeek);
+  lastDayOfWeek.setDate(firstDayOfWeek.getDate() + 6);
+  lastDayOfWeek.setHours(23, 59, 59, 999);
+  return date >= firstDayOfWeek && date <= lastDayOfWeek;
+};
+
+const isInCurrentMonth = (dateStr: string) => {
+  const date = safeParseDate(dateStr);
+  const today = new Date();
+  return date.getMonth() === today.getMonth() && date.getFullYear() === today.getFullYear();
+};
 
 // ---------- TIPOS ----------
 interface Student { 
@@ -84,6 +171,7 @@ interface ClassSession {
   topic: string; 
   date: string; 
   startTime: string; 
+  endTime?: string;
   price: number; 
   isPaid: boolean;
   isTrial?: boolean;
@@ -109,6 +197,7 @@ interface FormData {
   topic?: string; 
   date?: string; 
   time?: string; 
+  endTime?: string;
   price?: string | number; 
   reminderText?: string;
   isTrial?: boolean;
@@ -264,6 +353,7 @@ export default function App() {
   const [searchQuery, setSearchQuery] = useState('');
   const [filterPaid, setFilterPaid] = useState<'all' | 'paid' | 'pending'>('all');
   const [filterStudent, setFilterStudent] = useState<string>('all');
+  const [statsPeriod, setStatsPeriod] = useState<'week' | 'month' | 'year' | 'all'>('month');
   
   const [darkMode, setDarkMode] = useState(() => {
     if (typeof window !== 'undefined') return localStorage.getItem('darkMode') === 'true';
@@ -322,18 +412,43 @@ export default function App() {
     return () => { unsubStd(); unsubSess(); unsubRem(); };
   }, [user]);
 
-  // --- CÁLCULOS ESTADÍSTICOS (Recuperados) ---
+  // --- CÁLCULOS ESTADÍSTICOS MEJORADOS ---
   const stats = useMemo(() => {
-    const totalSessions = sessions.length;
-    const totalEarned = sessions.filter(s => s.isPaid).reduce((sum, s) => sum + s.price, 0);
-    const totalPending = sessions.filter(s => !s.isPaid).reduce((sum, s) => sum + s.price, 0);
-    const avgPrice = totalSessions > 0 ? sessions.reduce((sum, s) => sum + s.price, 0) / totalSessions : 0;
+    // Filtrar sesiones según el período seleccionado
+    let filteredSessions = sessions;
+    if (statsPeriod === 'week') {
+      filteredSessions = sessions.filter(s => isInCurrentWeek(s.date));
+    } else if (statsPeriod === 'month') {
+      filteredSessions = sessions.filter(s => isInCurrentMonth(s.date));
+    } else if (statsPeriod === 'year') {
+      const currentYear = new Date().getFullYear();
+      filteredSessions = sessions.filter(s => safeParseDate(s.date).getFullYear() === currentYear);
+    }
+
+    const totalSessions = filteredSessions.length;
+    const totalEarned = filteredSessions.filter(s => s.isPaid).reduce((sum, s) => sum + s.price, 0);
+    const totalPending = filteredSessions.filter(s => !s.isPaid).reduce((sum, s) => sum + s.price, 0);
+    const avgPrice = totalSessions > 0 ? filteredSessions.reduce((sum, s) => sum + s.price, 0) / totalSessions : 0;
     
+    // Estadísticas por semana
+    const weeklyStats: Record<string, { total: number; earned: number; pending: number }> = {};
+    sessions.forEach(s => {
+      const weekKey = getWeekKey(s.date);
+      if (!weeklyStats[weekKey]) weeklyStats[weekKey] = { total: 0, earned: 0, pending: 0 };
+      weeklyStats[weekKey].total++;
+      if (s.isPaid) {
+        weeklyStats[weekKey].earned += s.price;
+      } else {
+        weeklyStats[weekKey].pending += s.price;
+      }
+    });
+
+    // Estadísticas mensuales
     const monthlyStats: Record<string, { total: number; earned: number; pending: number }> = {};
     const yearlyStats: Record<string, { total: number; earned: number; pending: number }> = {};
     sessions.forEach(s => {
-      const monthKey = s.date.substring(0, 7);
-      const yearKey = s.date.substring(0, 4);
+      const monthKey = getMonthKey(s.date);
+      const yearKey = getYearKey(s.date);
       if (!monthlyStats[monthKey]) monthlyStats[monthKey] = { total: 0, earned: 0, pending: 0 };
       if (!yearlyStats[yearKey]) yearlyStats[yearKey] = { total: 0, earned: 0, pending: 0 };
       
@@ -348,8 +463,82 @@ export default function App() {
       }
     });
     
+    // Estadísticas por alumno (todas las sesiones)
+    const studentStats: Record<string, { 
+      total: number; 
+      earned: number; 
+      pending: number;
+      weekly: number;
+      monthly: number;
+      yearly: number;
+      weeklyEarned: number;
+      weeklyPending: number;
+      monthlyEarned: number;
+      monthlyPending: number;
+      yearlyEarned: number;
+      yearlyPending: number;
+      student: Student | undefined;
+    }> = {};
+    
+    const currentYear = new Date().getFullYear();
+    
+    sessions.forEach(s => {
+      if (!studentStats[s.studentId]) {
+        studentStats[s.studentId] = { 
+          total: 0, 
+          earned: 0, 
+          pending: 0, 
+          weekly: 0, 
+          monthly: 0,
+          yearly: 0,
+          weeklyEarned: 0,
+          weeklyPending: 0,
+          monthlyEarned: 0,
+          monthlyPending: 0,
+          yearlyEarned: 0,
+          yearlyPending: 0,
+          student: students.find(st => st.id === s.studentId)
+        };
+      }
+      studentStats[s.studentId].total++;
+      
+      // Contar clases por período
+      if (isInCurrentWeek(s.date)) {
+        studentStats[s.studentId].weekly++;
+        if (s.isPaid) {
+          studentStats[s.studentId].weeklyEarned += s.price;
+        } else {
+          studentStats[s.studentId].weeklyPending += s.price;
+        }
+      }
+      if (isInCurrentMonth(s.date)) {
+        studentStats[s.studentId].monthly++;
+        if (s.isPaid) {
+          studentStats[s.studentId].monthlyEarned += s.price;
+        } else {
+          studentStats[s.studentId].monthlyPending += s.price;
+        }
+      }
+      if (safeParseDate(s.date).getFullYear() === currentYear) {
+        studentStats[s.studentId].yearly++;
+        if (s.isPaid) {
+          studentStats[s.studentId].yearlyEarned += s.price;
+        } else {
+          studentStats[s.studentId].yearlyPending += s.price;
+        }
+      }
+      
+      // Totales generales
+      if (s.isPaid) {
+        studentStats[s.studentId].earned += s.price;
+      } else {
+        studentStats[s.studentId].pending += s.price;
+      }
+    });
+
+    // Top alumnos por ganancias totales
     const studentEarnings: Record<string, number> = {};
-    sessions.filter(s => s.isPaid).forEach(s => {
+    filteredSessions.filter(s => s.isPaid).forEach(s => {
       studentEarnings[s.studentId] = (studentEarnings[s.studentId] || 0) + s.price;
     });
     const topStudents = Object.entries(studentEarnings)
@@ -360,9 +549,33 @@ export default function App() {
         amount
       }))
       .filter(item => item.student);
+
+    // Top alumnos por cantidad de clases en el período
+    const topStudentsByClasses = Object.entries(studentStats)
+      .map(([id, data]) => ({
+        student: data.student,
+        classes: statsPeriod === 'week' ? data.weekly : statsPeriod === 'month' ? data.monthly : data.total,
+        earned: statsPeriod === 'week' || statsPeriod === 'month' 
+          ? filteredSessions.filter(s => s.studentId === id && s.isPaid).reduce((sum, s) => sum + s.price, 0)
+          : data.earned
+      }))
+      .filter(item => item.student && item.classes > 0)
+      .sort((a, b) => b.classes - a.classes)
+      .slice(0, 10);
     
-    return { totalSessions, totalEarned, totalPending, avgPrice, monthlyStats, yearlyStats, topStudents };
-  }, [sessions, students]);
+    return { 
+      totalSessions, 
+      totalEarned, 
+      totalPending, 
+      avgPrice, 
+      weeklyStats, 
+      monthlyStats, 
+      yearlyStats, 
+      topStudents,
+      studentStats: Object.values(studentStats).filter(s => s.student),
+      topStudentsByClasses
+    };
+  }, [sessions, students, statsPeriod]);
 
   const financials = useMemo(() => {
     return sessions.reduce((acc, curr) => {
@@ -378,8 +591,16 @@ export default function App() {
   // Exportar Data
   const exportData = (format: 'csv' | 'json') => {
     if (format === 'csv') {
-      const headers = ['Fecha', 'Hora', 'Alumno', 'Tema', 'Precio', 'Pagado'];
-      const rows = sessions.map(s => [s.date, s.startTime, s.studentName, s.topic, s.price.toString(), s.isPaid ? 'Sí' : 'No']);
+      const headers = ['Fecha', 'Hora Inicio', 'Hora Fin', 'Alumno', 'Tema', 'Precio', 'Pagado'];
+      const rows = sessions.map(s => [
+        s.date, 
+        s.startTime, 
+        s.endTime || '', 
+        s.studentName, 
+        s.topic, 
+        s.price.toString(), 
+        s.isPaid ? 'Sí' : 'No'
+      ]);
       const csvContent = [headers, ...rows].map(row => row.join(',')).join('\n');
       const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
       const link = document.createElement('a');
@@ -402,13 +623,13 @@ export default function App() {
   const openNewClassModal = useCallback(() => {
     if (students.length === 0) { push({ text: 'Registrá un alumno antes', kind: 'info' }); return; }
     setModalMode('add_class'); 
-    setFormData({ date: new Date().toISOString().split('T')[0], time: '17:00', isTrial: false }); 
+    setFormData({ date: new Date().toISOString().split('T')[0], time: '17:00', endTime: '18:00', isTrial: false }); 
     setIsModalOpen(true);
   }, [students.length, push]);
 
   const openEditClassModal = useCallback((session: ClassSession) => {
     setModalMode('add_class');
-    setFormData({ id: session.id, studentId: session.studentId, topic: session.topic, date: session.date, time: session.startTime, price: session.price, isTrial: session.isTrial });
+    setFormData({ id: session.id, studentId: session.studentId, topic: session.topic, date: session.date, time: session.startTime, endTime: session.endTime, price: session.price, isTrial: session.isTrial });
     setIsModalOpen(true);
   }, []);
 
@@ -497,7 +718,17 @@ export default function App() {
     setIsSubmitting(true);
     try {
       const isTrial = Boolean(formData.isTrial);
-      const data = { studentId: formData.studentId, studentName: student?.name || '', topic: formData.topic || 'Clase', date: formData.date || '', startTime: formData.time || '', price: isTrial ? 0 : Number(formData.price), isPaid: isTrial, isTrial };
+      const data = { 
+        studentId: formData.studentId, 
+        studentName: student?.name || '', 
+        topic: formData.topic || 'Clase', 
+        date: formData.date || '', 
+        startTime: formData.time || '', 
+        endTime: formData.endTime || '', 
+        price: isTrial ? 0 : Number(formData.price), 
+        isPaid: isTrial, 
+        isTrial 
+      };
       if (formData.id) { await updateDoc(doc(db, 'users', user.uid, 'sessions', formData.id), data); push({ text: 'Clase actualizada', kind: 'success' }); }
       else { await addDoc(collection(db, 'users', user.uid, 'sessions'), { ...data, createdAt: serverTimestamp() }); push({ text: 'Clase agendada', kind: 'success' }); }
       setIsModalOpen(false);
@@ -511,7 +742,8 @@ export default function App() {
     const std = students.find(st => st.id === s.studentId);
     const phone = std?.phone || std?.parentPhone;
     if (!phone) { push({ text: 'Sin teléfono', kind: 'error' }); return; }
-    window.open(`https://wa.me/${phone.replace(/\D/g,'')}?text=${encodeURIComponent(`Hola! Recuerdo la clase de ${s.topic} el ${new Date(s.date).toLocaleDateString()} a las ${s.startTime}`)}`, '_blank');
+    const horario = s.endTime ? `${s.startTime} a ${s.endTime}` : s.startTime;
+    window.open(`https://wa.me/${phone.replace(/\D/g,'')}?text=${encodeURIComponent(`Hola! Recuerdo la clase de ${s.topic} el ${new Date(s.date).toLocaleDateString()} de ${horario}`)}`, '_blank');
   };
   const addReminder = async (sid: string, text: string) => { if (user) await addDoc(collection(db, 'users', user.uid, 'reminders'), { studentId: sid, text, completed: false, createdAt: serverTimestamp() }); };
   const toggleReminder = async (id: string, c: boolean) => { if (user) await updateDoc(doc(db, 'users', user.uid, 'reminders', id), { completed: c, completedAt: c ? serverTimestamp() : null }); };
@@ -645,17 +877,74 @@ export default function App() {
         {view === 'agenda' && (
           <div className="space-y-8">
             {groupedSessions.map(g => (
-              <div key={g.date} className={isPastDate(g.date) ? 'opacity-60 grayscale' : ''}>
-                <div className="sticky top-[140px] z-10 flex justify-center mb-4"><span className={`${darkMode ? 'bg-slate-800 text-gray-100' : 'bg-slate-800 text-white'} text-xs font-bold px-3 py-1 rounded-full shadow-lg`}>{formatDateHeader(g.date)}</span></div>
-                <div className={`space-y-3 pl-4 border-l-2 ${darkMode ? 'border-indigo-800/50' : 'border-indigo-200'} ml-2`}>
+              <div key={g.date} className={isPastDate(g.date) ? 'opacity-70' : ''}>
+                <div className="sticky top-[140px] z-10 flex justify-center mb-4">
+                  <span
+                    className={[
+                      'text-xs font-bold px-3 py-1 rounded-full shadow-lg border backdrop-blur-sm',
+                      isPastDate(g.date)
+                        ? (darkMode ? 'bg-slate-800/80 text-gray-300 border-slate-700' : 'bg-slate-200 text-slate-700 border-slate-300')
+                        : isTodayDate(g.date)
+                          ? (darkMode ? 'bg-indigo-600/90 text-white border-indigo-400/40' : 'bg-indigo-600 text-white border-indigo-500')
+                          : isFutureDate(g.date)
+                            ? (darkMode ? 'bg-emerald-900/40 text-emerald-200 border-emerald-700/50' : 'bg-emerald-50 text-emerald-700 border-emerald-200')
+                            : (darkMode ? 'bg-slate-800 text-gray-100 border-slate-700' : 'bg-slate-800 text-white border-slate-800'),
+                    ].join(' ')}
+                  >
+                    {formatDateHeader(g.date)}
+                  </span>
+                </div>
+                <div
+                  className={[
+                    'space-y-3 pl-4 border-l-2 ml-2',
+                    isPastDate(g.date)
+                      ? (darkMode ? 'border-slate-700' : 'border-slate-300')
+                      : isTodayDate(g.date)
+                        ? (darkMode ? 'border-indigo-500/70' : 'border-indigo-400')
+                        : isFutureDate(g.date)
+                          ? (darkMode ? 'border-emerald-600/60' : 'border-emerald-300')
+                          : (darkMode ? 'border-indigo-800/50' : 'border-indigo-200'),
+                  ].join(' ')}
+                >
                   {g.items.map(s => (
-                    <div key={s.id} className={`p-4 rounded-2xl shadow-sm border ${darkMode ? 'bg-slate-800/80 border-slate-700' : 'bg-white border-gray-200'}`}>
+                    <div
+                      key={s.id}
+                      className={[
+                        'p-4 rounded-2xl shadow-sm border transition',
+                        isPastDate(g.date)
+                          ? (darkMode ? 'bg-slate-800/50 border-slate-700/70' : 'bg-slate-50 border-slate-200')
+                          : isTodayDate(g.date)
+                            ? (darkMode ? 'bg-indigo-950/30 border-indigo-700/60 shadow-indigo-950/20' : 'bg-indigo-50 border-indigo-200')
+                            : isFutureDate(g.date)
+                              ? (darkMode ? 'bg-emerald-950/20 border-emerald-800/50' : 'bg-emerald-50/60 border-emerald-200')
+                              : (darkMode ? 'bg-slate-800/80 border-slate-700' : 'bg-white border-gray-200'),
+                        isFutureDate(g.date) ? (darkMode ? 'hover:border-emerald-600/70' : 'hover:border-emerald-300') : '',
+                        isTodayDate(g.date) ? (darkMode ? 'hover:border-indigo-500/70' : 'hover:border-indigo-300') : '',
+                      ].join(' ')}
+                    >
                       <div className="flex justify-between items-start">
                         <div><h4 className={`font-bold text-lg ${darkMode ? 'text-gray-100' : 'text-gray-900'}`}>{s.studentName}</h4><p className={`text-xs ${darkMode ? 'text-gray-400' : 'text-gray-600'}`}>{s.topic}</p></div>
                         <span className={`font-bold ${s.isPaid || s.isTrial ? 'text-green-600 dark:text-green-400' : darkMode ? 'text-gray-300' : 'text-gray-700'}`}>{s.isTrial ? 'Gratis' : currency(s.price)}</span>
                       </div>
                       <div className="flex justify-between items-center mt-4">
-                        <span className={`text-sm font-bold flex gap-1 ${darkMode ? 'text-gray-400' : 'text-gray-600'}`}><Clock size={14} />{s.startTime}</span>
+                        <div className="flex items-center gap-2">
+                          <span className={`text-sm font-bold flex gap-1 ${darkMode ? 'text-gray-400' : 'text-gray-600'}`}>
+                            <Clock size={14} />
+                            {s.endTime ? `${s.startTime} - ${s.endTime}` : s.startTime}
+                          </span>
+                          <span
+                            className={[
+                              'text-[10px] font-black px-2 py-0.5 rounded-full border uppercase tracking-wide',
+                              isPastDate(g.date)
+                                ? (darkMode ? 'bg-slate-900/40 text-slate-300 border-slate-700' : 'bg-slate-100 text-slate-700 border-slate-200')
+                                : isTodayDate(g.date)
+                                  ? (darkMode ? 'bg-indigo-600/20 text-indigo-200 border-indigo-500/40' : 'bg-indigo-100 text-indigo-700 border-indigo-200')
+                                  : (darkMode ? 'bg-emerald-900/30 text-emerald-200 border-emerald-700/50' : 'bg-emerald-100 text-emerald-700 border-emerald-200'),
+                            ].join(' ')}
+                          >
+                            {isPastDate(g.date) ? 'Pasada' : isTodayDate(g.date) ? 'Hoy' : 'Futura'}
+                          </span>
+                        </div>
                         <div className="flex gap-2">
                           <button onClick={() => openEditClassModal(s)} className={`p-2 rounded-full transition ${darkMode ? 'bg-slate-700 text-gray-300 hover:bg-slate-600' : 'bg-slate-100 text-gray-700 hover:bg-slate-200'}`}><Pencil size={16} /></button>
                           <button onClick={() => sendWhatsApp(s)} className={`p-2 rounded-full transition ${darkMode ? 'bg-green-900/40 text-green-400 hover:bg-green-900/60' : 'bg-green-50 text-green-600 hover:bg-green-100'}`}><MessageCircle size={18} /></button>
@@ -693,9 +982,62 @@ export default function App() {
               </div>
             </div>
 
+            {/* Selector de Período */}
+            <div className={`p-4 rounded-2xl border shadow-sm ${darkMode ? 'bg-slate-800/80 border-slate-700' : 'bg-white border-gray-200'}`}>
+              <label className={`text-xs font-bold uppercase mb-3 block ${darkMode ? 'text-gray-400' : 'text-gray-600'}`}>Período de Análisis</label>
+              <div className="grid grid-cols-4 gap-2">
+                <button
+                  onClick={() => setStatsPeriod('week')}
+                  className={`p-3 rounded-xl text-xs font-bold transition flex flex-col items-center gap-1 ${
+                    statsPeriod === 'week' 
+                      ? darkMode ? 'bg-indigo-600 text-white' : 'bg-indigo-600 text-white'
+                      : darkMode ? 'bg-slate-700 text-gray-300 hover:bg-slate-600' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                  }`}
+                >
+                  <Calendar size={16} />
+                  <span>Semana</span>
+                </button>
+                <button
+                  onClick={() => setStatsPeriod('month')}
+                  className={`p-3 rounded-xl text-xs font-bold transition flex flex-col items-center gap-1 ${
+                    statsPeriod === 'month' 
+                      ? darkMode ? 'bg-indigo-600 text-white' : 'bg-indigo-600 text-white'
+                      : darkMode ? 'bg-slate-700 text-gray-300 hover:bg-slate-600' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                  }`}
+                >
+                  <CalendarDays size={16} />
+                  <span>Mes</span>
+                </button>
+                <button
+                  onClick={() => setStatsPeriod('year')}
+                  className={`p-3 rounded-xl text-xs font-bold transition flex flex-col items-center gap-1 ${
+                    statsPeriod === 'year' 
+                      ? darkMode ? 'bg-indigo-600 text-white' : 'bg-indigo-600 text-white'
+                      : darkMode ? 'bg-slate-700 text-gray-300 hover:bg-slate-600' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                  }`}
+                >
+                  <CalendarRange size={16} />
+                  <span>Año</span>
+                </button>
+                <button
+                  onClick={() => setStatsPeriod('all')}
+                  className={`p-3 rounded-xl text-xs font-bold transition flex flex-col items-center gap-1 ${
+                    statsPeriod === 'all' 
+                      ? darkMode ? 'bg-indigo-600 text-white' : 'bg-indigo-600 text-white'
+                      : darkMode ? 'bg-slate-700 text-gray-300 hover:bg-slate-600' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                  }`}
+                >
+                  <BarChart3 size={16} />
+                  <span>Total</span>
+                </button>
+              </div>
+            </div>
+
             <div className="grid grid-cols-2 gap-4">
               <div className={`p-4 rounded-2xl border shadow-sm ${darkMode ? 'bg-slate-800/80 border-slate-700' : 'bg-white border-gray-200'}`}>
-                <p className={`text-xs font-bold uppercase mb-2 ${darkMode ? 'text-gray-400' : 'text-gray-600'}`}>Total Clases</p>
+                <p className={`text-xs font-bold uppercase mb-2 ${darkMode ? 'text-gray-400' : 'text-gray-600'}`}>
+                  {statsPeriod === 'week' ? 'Clases Semana' : statsPeriod === 'month' ? 'Clases Mes' : statsPeriod === 'year' ? 'Clases Año' : 'Total Clases'}
+                </p>
                 <p className={`text-2xl font-black ${darkMode ? 'text-gray-100' : 'text-gray-900'}`}>{stats.totalSessions}</p>
               </div>
               <div className={`p-4 rounded-2xl border shadow-sm ${darkMode ? 'bg-slate-800/80 border-slate-700' : 'bg-white border-gray-200'}`}>
@@ -705,25 +1047,147 @@ export default function App() {
             </div>
 
             <div className={`p-6 rounded-2xl border shadow-sm ${darkMode ? 'bg-slate-800/80 border-slate-700' : 'bg-white border-gray-200'}`}>
-              <h4 className={`font-bold mb-4 flex items-center gap-2 ${darkMode ? 'text-gray-100' : 'text-gray-900'}`}><TrendingUp size={20} className={darkMode ? 'text-indigo-400' : 'text-indigo-600'} /> Resumen Financiero</h4>
+              <h4 className={`font-bold mb-4 flex items-center gap-2 ${darkMode ? 'text-gray-100' : 'text-gray-900'}`}><TrendingUp size={20} className={darkMode ? 'text-indigo-400' : 'text-indigo-600'} /> Resumen Financiero {statsPeriod !== 'all' && `(${statsPeriod === 'week' ? 'Semana' : statsPeriod === 'month' ? 'Mes' : 'Año'} Actual)`}</h4>
               <div className="space-y-4">
-                <div className="flex justify-between"><span className={darkMode ? 'text-gray-400' : 'text-gray-600'}>Total Cobrado</span><span className="text-xl font-bold text-green-600 dark:text-green-400">{currency(stats.totalEarned)}</span></div>
-                <div className="flex justify-between"><span className={darkMode ? 'text-gray-400' : 'text-gray-600'}>Por Cobrar</span><span className="text-xl font-bold text-red-600 dark:text-red-400">{currency(stats.totalPending)}</span></div>
-                <div className={`pt-4 border-t flex justify-between ${darkMode ? 'border-slate-700' : 'border-gray-200'}`}><span className={`font-bold ${darkMode ? 'text-gray-200' : 'text-gray-900'}`}>Total</span><span className="text-2xl font-black text-indigo-600 dark:text-indigo-400">{currency(stats.totalEarned + stats.totalPending)}</span></div>
+                <div className="flex justify-between items-center">
+                  <span className={darkMode ? 'text-gray-400' : 'text-gray-600'}>Total Cobrado</span>
+                  <span className="text-xl font-bold text-green-600 dark:text-green-400">{currency(stats.totalEarned)}</span>
+                </div>
+                <div className="flex justify-between items-center">
+                  <span className={darkMode ? 'text-gray-400' : 'text-gray-600'}>Por Cobrar</span>
+                  <span className="text-xl font-bold text-red-600 dark:text-red-400">{currency(stats.totalPending)}</span>
+                </div>
+                <div className={`pt-4 border-t flex justify-between items-center ${darkMode ? 'border-slate-700' : 'border-gray-200'}`}>
+                  <span className={`font-bold ${darkMode ? 'text-gray-200' : 'text-gray-900'}`}>Total {statsPeriod !== 'all' && 'del Período'}</span>
+                  <span className="text-2xl font-black text-indigo-600 dark:text-indigo-400">{currency(stats.totalEarned + stats.totalPending)}</span>
+                </div>
+                {stats.totalSessions > 0 && (
+                  <div className={`pt-3 border-t ${darkMode ? 'border-slate-700' : 'border-gray-200'}`}>
+                    <div className="flex justify-between items-center text-sm">
+                      <span className={darkMode ? 'text-gray-500' : 'text-gray-600'}>Ganancia promedio por clase</span>
+                      <span className={`font-bold ${darkMode ? 'text-gray-300' : 'text-gray-700'}`}>{currency((stats.totalEarned + stats.totalPending) / stats.totalSessions)}</span>
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
 
+            {/* Estadísticas por Alumno */}
+            {stats.studentStats.length > 0 && (
+              <div className={`p-6 rounded-2xl border shadow-sm ${darkMode ? 'bg-slate-800/80 border-slate-700' : 'bg-white border-gray-200'}`}>
+                <h4 className={`font-bold mb-4 flex items-center gap-2 ${darkMode ? 'text-gray-100' : 'text-gray-900'}`}>
+                  <Users size={20} className={darkMode ? 'text-indigo-400' : 'text-indigo-600'} /> 
+                  Clases por Alumno {statsPeriod !== 'all' && `(${statsPeriod === 'week' ? 'Semana' : statsPeriod === 'month' ? 'Mes' : 'Año'} Actual)`}
+                </h4>
+                <div className="space-y-3 max-h-96 overflow-y-auto">
+                  {stats.studentStats
+                    .sort((a, b) => {
+                      const aClasses = statsPeriod === 'week' ? a.weekly : statsPeriod === 'month' ? a.monthly : statsPeriod === 'year' ? a.yearly : a.total;
+                      const bClasses = statsPeriod === 'week' ? b.weekly : statsPeriod === 'month' ? b.monthly : statsPeriod === 'year' ? b.yearly : b.total;
+                      return bClasses - aClasses;
+                    })
+                    .map((studentStat, idx) => {
+                      const classes = statsPeriod === 'week' ? studentStat.weekly : statsPeriod === 'month' ? studentStat.monthly : statsPeriod === 'year' ? studentStat.yearly : studentStat.total;
+                      if (classes === 0 && statsPeriod !== 'all') return null;
+                      return (
+                        <div key={idx} className={`p-4 rounded-xl border ${darkMode ? 'bg-slate-700/50 border-slate-600' : 'bg-gray-50 border-gray-200'}`}>
+                          <div className="flex justify-between items-start mb-2">
+                            <div className="flex items-center gap-3">
+                              <div className={`w-8 h-8 rounded-full flex items-center justify-center font-bold text-sm ${darkMode ? 'bg-indigo-900/50 text-indigo-300' : 'bg-indigo-100 text-indigo-700'}`}>
+                                {idx + 1}
+                              </div>
+                              <div>
+                                <span className={`font-bold ${darkMode ? 'text-gray-100' : 'text-gray-900'}`}>{studentStat.student?.name}</span>
+                                <span className={`text-xs ml-2 px-2 py-0.5 rounded-full ${darkMode ? 'bg-slate-600 text-gray-300' : 'bg-gray-200 text-gray-600'}`}>
+                                  {studentStat.student?.level}
+                                </span>
+                              </div>
+                            </div>
+                            <div className="text-right">
+                              <div className={`text-lg font-black ${darkMode ? 'text-gray-100' : 'text-gray-900'}`}>{classes}</div>
+                              <div className={`text-xs ${darkMode ? 'text-gray-400' : 'text-gray-600'}`}>clases</div>
+                            </div>
+                          </div>
+                          <div className="grid grid-cols-2 gap-3 mt-3 pt-3 border-t border-slate-600/50 dark:border-slate-600">
+                            <div>
+                              <div className={`text-xs ${darkMode ? 'text-gray-400' : 'text-gray-600'} mb-1`}>Ganado</div>
+                              <div className="font-bold text-green-600 dark:text-green-400">
+                                {currency(
+                                  statsPeriod === 'week' ? studentStat.weeklyEarned :
+                                  statsPeriod === 'month' ? studentStat.monthlyEarned :
+                                  statsPeriod === 'year' ? studentStat.yearlyEarned :
+                                  studentStat.earned
+                                )}
+                              </div>
+                            </div>
+                            <div>
+                              <div className={`text-xs ${darkMode ? 'text-gray-400' : 'text-gray-600'} mb-1`}>Pendiente</div>
+                              <div className="font-bold text-red-600 dark:text-red-400">
+                                {currency(
+                                  statsPeriod === 'week' ? studentStat.weeklyPending :
+                                  statsPeriod === 'month' ? studentStat.monthlyPending :
+                                  statsPeriod === 'year' ? studentStat.yearlyPending :
+                                  studentStat.pending
+                                )}
+                              </div>
+                            </div>
+                          </div>
+                          {statsPeriod === 'all' && (
+                            <div className="mt-3 pt-3 border-t border-slate-600/50 dark:border-slate-600 grid grid-cols-2 gap-3 text-xs">
+                              <div>
+                                <span className={darkMode ? 'text-gray-400' : 'text-gray-600'}>Semana: </span>
+                                <span className={`font-bold ${darkMode ? 'text-gray-200' : 'text-gray-800'}`}>{studentStat.weekly}</span>
+                              </div>
+                              <div>
+                                <span className={darkMode ? 'text-gray-400' : 'text-gray-600'}>Mes: </span>
+                                <span className={`font-bold ${darkMode ? 'text-gray-200' : 'text-gray-800'}`}>{studentStat.monthly}</span>
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                </div>
+              </div>
+            )}
+
             {stats.topStudents.length > 0 && (
               <div className={`p-6 rounded-2xl border shadow-sm ${darkMode ? 'bg-slate-800/80 border-slate-700' : 'bg-white border-gray-200'}`}>
-                <h4 className={`font-bold mb-4 ${darkMode ? 'text-gray-100' : 'text-gray-900'}`}>Top Alumnos</h4>
+                <h4 className={`font-bold mb-4 flex items-center gap-2 ${darkMode ? 'text-gray-100' : 'text-gray-900'}`}>
+                  <DollarSign size={20} className={darkMode ? 'text-indigo-400' : 'text-indigo-600'} /> 
+                  Top Alumnos por Ganancias {statsPeriod !== 'all' && `(${statsPeriod === 'week' ? 'Semana' : statsPeriod === 'month' ? 'Mes' : 'Año'} Actual)`}
+                </h4>
                 <div className="space-y-3">
                   {stats.topStudents.map((item, idx) => (
-                    <div key={idx} className="flex justify-between items-center">
+                    <div key={idx} className="flex justify-between items-center p-3 rounded-xl bg-gradient-to-r from-green-50 to-emerald-50 dark:from-green-950/30 dark:to-emerald-950/30 border border-green-200 dark:border-green-800/50">
                       <div className="flex items-center gap-3">
-                        <div className={`w-8 h-8 rounded-full flex items-center justify-center font-bold text-sm ${darkMode ? 'bg-indigo-900/50 text-indigo-300' : 'bg-indigo-100 text-indigo-700'}`}>{idx + 1}</div>
-                        <span className={darkMode ? 'text-gray-200' : 'text-gray-900'}>{item.student?.name}</span>
+                        <div className={`w-8 h-8 rounded-full flex items-center justify-center font-bold text-sm ${darkMode ? 'bg-green-900/50 text-green-300' : 'bg-green-100 text-green-700'}`}>{idx + 1}</div>
+                        <span className={`font-bold ${darkMode ? 'text-gray-100' : 'text-gray-900'}`}>{item.student?.name}</span>
                       </div>
-                      <span className="font-bold text-green-600 dark:text-green-400">{currency(item.amount)}</span>
+                      <span className="font-bold text-green-600 dark:text-green-400 text-lg">{currency(item.amount)}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Estadísticas Semanales */}
+            {Object.keys(stats.weeklyStats).length > 0 && statsPeriod === 'all' && (
+              <div className={`p-6 rounded-2xl border shadow-sm ${darkMode ? 'bg-slate-800/80 border-slate-700' : 'bg-white border-gray-200'}`}>
+                <h4 className={`font-bold mb-4 ${darkMode ? 'text-gray-100' : 'text-gray-900'}`}>Balance Semanal</h4>
+                <div className="space-y-4 max-h-64 overflow-y-auto">
+                  {Object.entries(stats.weeklyStats).sort((a, b) => b[0].localeCompare(a[0])).slice(0, 8).map(([week, data]) => (
+                    <div key={week}>
+                      <div className="flex justify-between text-sm mb-1">
+                        <span className={`capitalize ${darkMode ? 'text-gray-300' : 'text-gray-700'}`}>{formatWeekLabel(week)}</span>
+                        <div className="flex gap-3">
+                          <span className="font-bold text-green-600 dark:text-green-400">{currency(data.earned)}</span>
+                          <span className={darkMode ? 'text-gray-500' : 'text-gray-500'}>{data.total} clases</span>
+                        </div>
+                      </div>
+                      <div className={`h-2 rounded-full overflow-hidden ${darkMode ? 'bg-slate-700' : 'bg-slate-100'}`}>
+                        <div className="h-full bg-gradient-to-r from-green-500 to-emerald-500 dark:from-green-600 dark:to-emerald-600" style={{ width: `${Math.min(((data.earned) / (data.earned + data.pending || 1)) * 100, 100)}%` }} />
+                      </div>
                     </div>
                   ))}
                 </div>
@@ -737,11 +1201,15 @@ export default function App() {
                   {Object.entries(stats.monthlyStats).sort((a, b) => b[0].localeCompare(a[0])).slice(0, 6).map(([month, data]) => (
                     <div key={month}>
                       <div className="flex justify-between text-sm mb-1">
-                        <span className={`capitalize ${darkMode ? 'text-gray-300' : 'text-gray-700'}`}>{new Date(month + '-01').toLocaleDateString('es-AR', { month: 'long', year: 'numeric' })}</span>
-                        <span className="font-bold text-green-600 dark:text-green-400">{currency(data.earned)}</span>
+                        <span className={`capitalize ${darkMode ? 'text-gray-300' : 'text-gray-700'}`}>{safeParseDate(month + '-01').toLocaleDateString('es-AR', { month: 'long', year: 'numeric' })}</span>
+                        <span className="font-bold text-indigo-600 dark:text-indigo-400">{currency(data.earned + data.pending)}</span>
                       </div>
                       <div className={`h-2 rounded-full overflow-hidden ${darkMode ? 'bg-slate-700' : 'bg-slate-100'}`}>
                         <div className="h-full bg-green-500 dark:bg-green-600" style={{ width: `${Math.min(((data.earned) / (data.earned + data.pending || 1)) * 100, 100)}%` }} />
+                      </div>
+                      <div className={`mt-2 flex justify-between text-[11px] ${darkMode ? 'text-gray-400' : 'text-gray-600'}`}>
+                        <span>Cobrado: <span className="font-bold text-green-600 dark:text-green-400">{currency(data.earned)}</span></span>
+                        <span>Pendiente: <span className="font-bold text-red-600 dark:text-red-400">{currency(data.pending)}</span></span>
                       </div>
                     </div>
                   ))}
@@ -789,9 +1257,46 @@ export default function App() {
                 <>
                   <div><label className={`text-xs font-bold uppercase ${darkMode ? 'text-gray-400' : 'text-gray-600'}`}>Alumno</label><select disabled={!!formData.id} className={`w-full p-4 rounded-xl border ${darkMode ? 'bg-slate-700 border-slate-600 text-gray-100' : 'bg-white border-gray-200 text-gray-900'} focus:outline-none focus:ring-2 focus:ring-indigo-500 dark:focus:ring-indigo-400 disabled:opacity-50`} value={formData.studentId || ''} onChange={e => { const s = students.find(st => st.id === e.target.value); setFormData({ ...formData, studentId: s?.id, price: s?.defaultPrice }); }}><option value="">Seleccionar...</option>{students.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}</select></div>
                   <div><label className={`text-xs font-bold uppercase ${darkMode ? 'text-gray-400' : 'text-gray-600'}`}>Tema</label><input className={`w-full p-3 rounded-xl border ${darkMode ? 'bg-slate-700 border-slate-600 text-gray-100 placeholder-gray-500' : 'bg-white border-gray-200 text-gray-900 placeholder-gray-400'} focus:outline-none focus:ring-2 focus:ring-indigo-500 dark:focus:ring-indigo-400`} value={formData.topic || ''} onChange={e => setFormData({ ...formData, topic: e.target.value })} /></div>
-                  <div className="flex gap-2">
-                    <div className="flex-1"><label className={`text-xs font-bold uppercase ${darkMode ? 'text-gray-400' : 'text-gray-600'}`}>Fecha</label><input type="date" className={`w-full p-3 rounded-xl border ${darkMode ? 'bg-slate-700 border-slate-600 text-gray-100' : 'bg-white border-gray-200 text-gray-900'} focus:outline-none focus:ring-2 focus:ring-indigo-500 dark:focus:ring-indigo-400`} value={formData.date || ''} onChange={e => setFormData({ ...formData, date: e.target.value })} /></div>
-                    <div className="w-1/3"><label className={`text-xs font-bold uppercase ${darkMode ? 'text-gray-400' : 'text-gray-600'}`}>Hora</label><input type="time" className={`w-full p-3 rounded-xl border ${darkMode ? 'bg-slate-700 border-slate-600 text-gray-100' : 'bg-white border-gray-200 text-gray-900'} focus:outline-none focus:ring-2 focus:ring-indigo-500 dark:focus:ring-indigo-400`} value={formData.time || ''} onChange={e => setFormData({ ...formData, time: e.target.value })} /></div>
+                  <div>
+                    <label className={`text-xs font-bold uppercase mb-2 block ${darkMode ? 'text-gray-400' : 'text-gray-600'}`}>Fecha</label>
+                    <input
+                      type="date"
+                      className={`w-full p-3 rounded-xl border ${darkMode ? 'bg-slate-700 border-slate-600 text-gray-100' : 'bg-white border-gray-200 text-gray-900'} focus:outline-none focus:ring-2 focus:ring-indigo-500 dark:focus:ring-indigo-400`}
+                      value={formData.date || ''}
+                      onChange={e => setFormData({ ...formData, date: e.target.value })}
+                    />
+                  </div>
+                  <div>
+                    <label className={`text-xs font-bold uppercase mb-2 block ${darkMode ? 'text-gray-400' : 'text-gray-600'}`}>Horario</label>
+                    <div className="flex gap-3 items-end">
+                      <div className="flex-1">
+                        <label className={`text-xs mb-1.5 block ${darkMode ? 'text-gray-500' : 'text-gray-600'} font-medium`}>Hora inicio</label>
+                        <div className={`relative time-input-wrapper ${darkMode ? 'time-input-dark' : 'time-input-light'}`}>
+                          <Clock size={16} className={`absolute left-3 top-1/2 -translate-y-1/2 ${darkMode ? 'text-indigo-400' : 'text-indigo-600'}`} />
+                          <input
+                            type="time"
+                            className={`w-full pl-10 pr-3 py-3 rounded-xl border ${darkMode ? 'bg-slate-700 border-slate-600 text-gray-100' : 'bg-white border-gray-200 text-gray-900'} focus:outline-none focus:ring-2 focus:ring-indigo-500 dark:focus:ring-indigo-400 time-input`}
+                            value={formData.time || ''}
+                            onChange={e => setFormData({ ...formData, time: e.target.value })}
+                          />
+                        </div>
+                      </div>
+                      <div className="pb-2.5 px-1">
+                        <span className={`text-lg font-bold ${darkMode ? 'text-gray-400' : 'text-gray-500'}`}>→</span>
+                      </div>
+                      <div className="flex-1">
+                        <label className={`text-xs mb-1.5 block ${darkMode ? 'text-gray-500' : 'text-gray-600'} font-medium`}>Hora fin</label>
+                        <div className={`relative time-input-wrapper ${darkMode ? 'time-input-dark' : 'time-input-light'}`}>
+                          <Clock size={16} className={`absolute left-3 top-1/2 -translate-y-1/2 ${darkMode ? 'text-indigo-400' : 'text-indigo-600'}`} />
+                          <input
+                            type="time"
+                            className={`w-full pl-10 pr-3 py-3 rounded-xl border ${darkMode ? 'bg-slate-700 border-slate-600 text-gray-100' : 'bg-white border-gray-200 text-gray-900'} focus:outline-none focus:ring-2 focus:ring-indigo-500 dark:focus:ring-indigo-400 time-input`}
+                            value={formData.endTime || ''}
+                            onChange={e => setFormData({ ...formData, endTime: e.target.value })}
+                          />
+                        </div>
+                      </div>
+                    </div>
                   </div>
                   <div><label className={`text-xs font-bold uppercase ${darkMode ? 'text-gray-400' : 'text-gray-600'}`}>Precio</label><div className="relative"><span className={`absolute left-4 top-3.5 font-bold ${darkMode ? 'text-gray-400' : 'text-gray-600'}`}>$</span><input type="number" className={`w-full p-3 pl-8 rounded-xl border font-bold ${darkMode ? 'bg-slate-700 border-slate-600 text-gray-100 placeholder-gray-500' : 'bg-white border-gray-200 text-gray-900 placeholder-gray-400'} focus:outline-none focus:ring-2 focus:ring-indigo-500 dark:focus:ring-indigo-400 disabled:opacity-50`} value={formData.price ?? ''} disabled={Boolean(formData.isTrial)} onChange={e => setFormData({ ...formData, price: e.target.value })} /></div></div>
                   <div className="flex items-center gap-2 mt-2"><input type="checkbox" checked={Boolean(formData.isTrial)} onChange={(e) => { const isTrial = e.target.checked; const selected = students.find(st => st.id === formData.studentId); setFormData(prev => ({ ...prev, isTrial, price: isTrial ? 0 : (prev.price ?? selected?.defaultPrice) })); }} className="w-5 h-5 accent-indigo-600" /><label className={darkMode ? 'text-gray-300' : 'text-gray-700'}>Clase de prueba (Gratis)</label></div>
