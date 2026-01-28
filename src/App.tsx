@@ -83,6 +83,19 @@ const withTimeout = <T,>(promise: Promise<T>, ms = 15000) => {
 
 const parseDateLocal = (dateStr: string) => safeParseDate(dateStr);
 
+/** Devuelve la duración en horas entre startTime y endTime (formato "HH:mm"). Si no hay endTime, devuelve 1. */
+function getDurationHours(startTime: string, endTime?: string): number {
+  if (!startTime) return 1;
+  const [sh, sm] = startTime.split(':').map(Number);
+  const startMins = (sh ?? 0) * 60 + (sm ?? 0);
+  if (!endTime?.trim()) return 1;
+  const [eh, em] = endTime.split(':').map(Number);
+  const endMins = (eh ?? 0) * 60 + (em ?? 0);
+  const diffMins = endMins - startMins;
+  if (diffMins <= 0) return 1;
+  return Math.round((diffMins / 60) * 100) / 100;
+}
+
 // Funciones para estadísticas por período
 const safeParseDate = (dateStr: string) => {
   // Soporta:
@@ -629,7 +642,9 @@ export default function App() {
 
   const openEditClassModal = useCallback((session: ClassSession) => {
     setModalMode('add_class');
-    setFormData({ id: session.id, studentId: session.studentId, topic: session.topic, date: session.date, time: session.startTime, endTime: session.endTime, price: session.price, isTrial: session.isTrial });
+    const duration = getDurationHours(session.startTime, session.endTime);
+    const pricePerHour = duration > 0 ? Math.round(session.price / duration) : session.price;
+    setFormData({ id: session.id, studentId: session.studentId, topic: session.topic, date: session.date, time: session.startTime, endTime: session.endTime, price: pricePerHour, isTrial: session.isTrial });
     setIsModalOpen(true);
   }, []);
 
@@ -718,6 +733,8 @@ export default function App() {
     setIsSubmitting(true);
     try {
       const isTrial = Boolean(formData.isTrial);
+      const duration = getDurationHours(formData.time || '', formData.endTime);
+      const totalPrice = isTrial ? 0 : Math.round((Number(formData.price) || 0) * duration);
       const data = { 
         studentId: formData.studentId, 
         studentName: student?.name || '', 
@@ -725,7 +742,7 @@ export default function App() {
         date: formData.date || '', 
         startTime: formData.time || '', 
         endTime: formData.endTime || '', 
-        price: isTrial ? 0 : Number(formData.price), 
+        price: totalPrice, 
         isPaid: isTrial, 
         isTrial 
       };
@@ -923,26 +940,34 @@ export default function App() {
                       ].join(' ')}
                     >
                       <div className="flex justify-between items-start">
-                        <div><h4 className={`font-bold text-lg ${darkMode ? 'text-gray-100' : 'text-gray-900'}`}>{s.studentName}</h4><p className={`text-xs ${darkMode ? 'text-gray-400' : 'text-gray-600'}`}>{s.topic}</p></div>
-                        <span className={`font-bold ${s.isPaid || s.isTrial ? 'text-green-600 dark:text-green-400' : darkMode ? 'text-gray-300' : 'text-gray-700'}`}>{s.isTrial ? 'Gratis' : currency(s.price)}</span>
+                        <div className="flex-1 min-w-0">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <h4 className={`font-bold text-lg ${darkMode ? 'text-gray-100' : 'text-gray-900'}`}>{s.studentName}</h4>
+                            <span
+                              className={[
+                                'text-[10px] font-black px-2 py-0.5 rounded-full border uppercase tracking-wide flex-shrink-0',
+                                isPastDate(g.date)
+                                  ? (darkMode ? 'bg-slate-900/40 text-slate-300 border-slate-700' : 'bg-slate-100 text-slate-700 border-slate-200')
+                                  : isTodayDate(g.date)
+                                    ? (darkMode ? 'bg-indigo-600/20 text-indigo-200 border-indigo-500/40' : 'bg-indigo-100 text-indigo-700 border-indigo-200')
+                                    : (darkMode ? 'bg-emerald-900/30 text-emerald-200 border-emerald-700/50' : 'bg-emerald-100 text-emerald-700 border-emerald-200'),
+                              ].join(' ')}
+                            >
+                              {isPastDate(g.date) ? 'Pasada' : isTodayDate(g.date) ? 'Hoy' : 'Futura'}
+                            </span>
+                          </div>
+                          <p className={`text-xs mt-0.5 ${darkMode ? 'text-gray-400' : 'text-gray-600'}`}>{s.topic}</p>
+                        </div>
+                        <span className={`font-bold flex-shrink-0 ml-2 ${s.isPaid || s.isTrial ? 'text-green-600 dark:text-green-400' : darkMode ? 'text-gray-300' : 'text-gray-700'}`}>{s.isTrial ? 'Gratis' : currency(s.price)}</span>
                       </div>
                       <div className="flex justify-between items-center mt-4">
-                        <div className="flex items-center gap-2">
+                        <div className="flex items-center gap-2 flex-wrap">
                           <span className={`text-sm font-bold flex gap-1 ${darkMode ? 'text-gray-400' : 'text-gray-600'}`}>
                             <Clock size={14} />
                             {s.endTime ? `${s.startTime} - ${s.endTime}` : s.startTime}
                           </span>
-                          <span
-                            className={[
-                              'text-[10px] font-black px-2 py-0.5 rounded-full border uppercase tracking-wide',
-                              isPastDate(g.date)
-                                ? (darkMode ? 'bg-slate-900/40 text-slate-300 border-slate-700' : 'bg-slate-100 text-slate-700 border-slate-200')
-                                : isTodayDate(g.date)
-                                  ? (darkMode ? 'bg-indigo-600/20 text-indigo-200 border-indigo-500/40' : 'bg-indigo-100 text-indigo-700 border-indigo-200')
-                                  : (darkMode ? 'bg-emerald-900/30 text-emerald-200 border-emerald-700/50' : 'bg-emerald-100 text-emerald-700 border-emerald-200'),
-                            ].join(' ')}
-                          >
-                            {isPastDate(g.date) ? 'Pasada' : isTodayDate(g.date) ? 'Hoy' : 'Futura'}
+                          <span className={`text-xs font-medium ${darkMode ? 'text-gray-500' : 'text-gray-500'}`}>
+                            ({getDurationHours(s.startTime, s.endTime)} h)
                           </span>
                         </div>
                         <div className="flex gap-2">
@@ -1268,8 +1293,8 @@ export default function App() {
                   </div>
                   <div>
                     <label className={`text-xs font-bold uppercase mb-2 block ${darkMode ? 'text-gray-400' : 'text-gray-600'}`}>Horario</label>
-                    <div className="flex gap-3 items-end">
-                      <div className="flex-1">
+                    <div className="flex flex-col sm:flex-row gap-3 sm:items-end">
+                      <div className="flex-1 w-full sm:w-auto">
                         <label className={`text-xs mb-1.5 block ${darkMode ? 'text-gray-500' : 'text-gray-600'} font-medium`}>Hora inicio</label>
                         <div className={`relative time-input-wrapper ${darkMode ? 'time-input-dark' : 'time-input-light'}`}>
                           <Clock size={16} className={`absolute left-3 top-1/2 -translate-y-1/2 ${darkMode ? 'text-indigo-400' : 'text-indigo-600'}`} />
@@ -1281,10 +1306,10 @@ export default function App() {
                           />
                         </div>
                       </div>
-                      <div className="pb-2.5 px-1">
+                      <div className="hidden sm:block pb-2.5 px-1">
                         <span className={`text-lg font-bold ${darkMode ? 'text-gray-400' : 'text-gray-500'}`}>→</span>
                       </div>
-                      <div className="flex-1">
+                      <div className="flex-1 w-full sm:w-auto">
                         <label className={`text-xs mb-1.5 block ${darkMode ? 'text-gray-500' : 'text-gray-600'} font-medium`}>Hora fin</label>
                         <div className={`relative time-input-wrapper ${darkMode ? 'time-input-dark' : 'time-input-light'}`}>
                           <Clock size={16} className={`absolute left-3 top-1/2 -translate-y-1/2 ${darkMode ? 'text-indigo-400' : 'text-indigo-600'}`} />
